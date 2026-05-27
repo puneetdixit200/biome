@@ -48,5 +48,8 @@ pub(crate) fn is_multiline_double_text_expression(node: &HtmlDoubleTextExpressio
 }
 
 fn has_boundary_newline(text: &str) -> bool {
-    text.starts_with(['\n', '\r']) || text.ends_with(['\n', '\r'])
+    let leading_indentation = text.trim_start_matches([' ', '\t']);
+    let trailing_indentation = text.trim_end_matches([' ', '\t']);
+
+    leading_indentation.starts_with(['\n', '\r']) || trailing_indentation.ends_with(['\n', '\r'])
 }
