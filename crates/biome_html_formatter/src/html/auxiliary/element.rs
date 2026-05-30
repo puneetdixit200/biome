@@ -4,8 +4,9 @@ use crate::verbatim::{format_html_leading_comments, format_html_leading_comments
 use crate::{html::lists::element_list::FormatHtmlElementList, prelude::*};
 use biome_formatter::{CstFormatContext, FormatRefWithRule, FormatRuleWithOptions, write};
 use biome_html_syntax::{
-    AnyHtmlContent, AnyHtmlElement, AnyHtmlTagName, HtmlElement, HtmlElementFields,
-    HtmlElementList, HtmlRoot, HtmlSelfClosingElement, HtmlSyntaxToken,
+    AnyHtmlContent, AnyHtmlElement, AnyHtmlTagName, AnyHtmlTextExpression, HtmlElement,
+    HtmlElementFields, HtmlElementList, HtmlRoot, HtmlSelfClosingElement, HtmlSyntaxToken,
+    HtmlTextExpression,
 };
 use biome_rowan::TokenText;
 use biome_string_case::StrLikeExtension;
@@ -202,6 +203,9 @@ impl FormatHtmlElement {
         let forces_break_children = should_force_break_content
             // If `<template>` is at the root level, always force multiline formatting of its children.
             || (is_root_element_list && is_template_element)
+            // Text interpolations written across multiple lines should remain block-like
+            // even when the containing component has inline display metadata.
+            || has_single_multiline_interpolation_child(&children)
             // Elements with a leading newline and direct element children should force
             // multiline unless they mix text with element children. Without a leading
             // newline (e.g. `<span><em>foo</em></span>`), the children stay inline.
@@ -237,12 +241,14 @@ impl FormatHtmlElement {
             && !children.is_empty()
             && !content_has_leading_whitespace
             && !should_be_verbatim
-            && !should_format_embedded_nodes;
+            && !should_format_embedded_nodes
+            && !forces_break_children;
         let should_borrow_closing_tag = is_element_internally_whitespace_sensitive
             && !children.is_empty()
             && !content_has_trailing_whitespace
             && !should_be_verbatim
-            && !should_format_embedded_nodes;
+            && !should_format_embedded_nodes
+            && !forces_break_children;
 
         let borrowed_r_angle = if should_borrow_opening_r_angle {
             opening_element.r_angle_token().ok()
@@ -373,4 +379,72 @@ fn has_text_child(node: &HtmlElementList) -> bool {
             .value_token()
             .is_ok_and(|token| !token.text_trimmed().is_empty())
     })
+}
+
+fn has_single_multiline_interpolation_child(node: &HtmlElementList) -> bool {
+    let mut meaningful_children = node.iter().filter(|child| !is_empty_html_content(child));
+
+    let Some(AnyHtmlElement::AnyHtmlContent(AnyHtmlContent::AnyHtmlTextExpression(expression))) =
+        meaningful_children.next()
+    else {
+        return false;
+    };
+
+    if meaningful_children.next().is_some() {
+        return false;
+    }
+
+    match expression {
+        AnyHtmlTextExpression::HtmlDoubleTextExpression(expression) => expression
+            .expression()
+            .is_ok_and(text_expression_has_boundary_line_break),
+        AnyHtmlTextExpression::HtmlSingleTextExpression(expression) => expression
+            .expression()
+            .is_ok_and(text_expression_has_boundary_line_break),
+        _ => false,
+    }
+}
+
+fn is_empty_html_content(child: &AnyHtmlElement) -> bool {
+    let AnyHtmlElement::AnyHtmlContent(AnyHtmlContent::HtmlContent(content)) = child else {
+        return false;
+    };
+
+    content
+        .value_token()
+        .is_ok_and(|token| token.text_trimmed().is_empty())
+}
+
+fn text_expression_has_boundary_line_break(expression: HtmlTextExpression) -> bool {
+    let Ok(token) = expression.html_literal_token() else {
+        return false;
+    };
+
+    token
+        .leading_trivia()
+        .pieces()
+        .any(|piece| piece.is_newline() || piece.text().chars().any(is_line_break))
+        || token
+            .trailing_trivia()
+            .pieces()
+            .any(|piece| piece.is_newline() || piece.text().chars().any(is_line_break))
+        || text_has_boundary_line_break(token.text())
+}
+
+fn text_has_boundary_line_break(text: &str) -> bool {
+    let leading_whitespace_has_line_break = text
+        .chars()
+        .take_while(|character| character.is_whitespace())
+        .any(is_line_break);
+    let trailing_whitespace_has_line_break = text
+        .chars()
+        .rev()
+        .take_while(|character| character.is_whitespace())
+        .any(is_line_break);
+
+    leading_whitespace_has_line_break || trailing_whitespace_has_line_break
+}
+
+fn is_line_break(character: char) -> bool {
+    matches!(character, '\n' | '\r')
 }
