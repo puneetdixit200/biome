@@ -1,0 +1,27 @@
+---
+source: crates/biome_service/src/workspace/server.tests.rs
+expression: result.as_code()
+---
+<template>
+	<div>
+		<span>
+			<div>
+				<v-btn v-if="store.state.user" variant="text" to="/my-rooms"
+					>{{ $t("nav.my-rooms") }}</v-btn
+				>
+			</div>
+		</span>
+	</div>
+</template>
+
+<template>
+	<v-btn>
+		<v-tooltip activator="parent" location="bottom">
+			<span>
+				{{ store.state.room.enableVoteSkip
+					? $t("room.next-video-vote")
+					: $t("room.next-video") }}
+			</span>
+		</v-tooltip>
+	</v-btn>
+</template>

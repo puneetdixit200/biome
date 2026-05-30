@@ -46,7 +46,9 @@ use biome_html_formatter::{
 };
 use biome_html_parser::{HtmlParserOptions, parse_html_with_cache};
 use biome_html_syntax::element_ext::AnyEmbeddedContent;
-use biome_html_syntax::{HtmlFileSource, HtmlLanguage, HtmlRoot, HtmlSyntaxNode};
+use biome_html_syntax::{
+    HtmlFileSource, HtmlLanguage, HtmlRoot, HtmlSyntaxNode, HtmlTextExpression,
+};
 use biome_js_syntax::{JsFileSource, JsLanguage};
 use biome_json_syntax::JsonLanguage;
 use biome_parser::AnyParse;
@@ -468,13 +470,26 @@ fn format_embedded(
     let options = settings.format_options::<HtmlLanguage>(biome_path, document_file_source);
 
     let tree = parse.syntax();
+    let text_expression_ranges = tree
+        .descendants()
+        .filter_map(HtmlTextExpression::cast)
+        .map(|node| node.range())
+        .collect::<Vec<_>>();
     let indent_script_and_style = options.indent_script_and_style().value();
     let mut formatted = format_node(options, &tree, true)?;
     formatted.format_embedded(move |range| {
         let mut iter = embedded_nodes.iter();
         let node = iter.find(|node| node.range == range)?;
 
+        let is_text_expression = text_expression_ranges.contains(&range);
+
         let wrap_document = |document: Document, should_indent: bool| {
+            if is_text_expression {
+                return Document::new(vec![FormatElement::Interned(Interned::new(
+                    document.into_elements(),
+                ))]);
+            }
+
             if indent_script_and_style && should_indent {
                 let elements = vec![
                     FormatElement::Line(LineMode::Hard),

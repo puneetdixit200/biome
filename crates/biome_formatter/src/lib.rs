@@ -1033,23 +1033,30 @@ impl<Context> Formatted<Context> {
     where
         F: FnMut(TextRange) -> Option<Document>,
     {
-        let mut last_start_resolved = false;
+        let mut trailing_line_after_embedded = None;
         self.document.transform(move |element| match element {
             FormatElement::Tag(Tag::StartEmbedded(range)) => match fn_format_embedded(*range) {
                 Some(document) => {
-                    last_start_resolved = true;
+                    trailing_line_after_embedded = Some(matches!(
+                        document.as_elements().first(),
+                        Some(FormatElement::Line(LineMode::Hard))
+                    ));
                     Some(FormatElement::Interned(Interned::new(
                         document.into_elements(),
                     )))
                 }
                 None => {
                     // Keep the StartEmbedded tag so it stays paired with EndEmbedded.
-                    last_start_resolved = false;
+                    trailing_line_after_embedded = None;
                     None
                 }
             },
             FormatElement::Tag(Tag::EndEmbedded) => {
-                if last_start_resolved {
+                if let Some(should_write_trailing_line) = trailing_line_after_embedded.take() {
+                    if !should_write_trailing_line {
+                        return Some(FormatElement::Interned(Interned::new(Vec::new())));
+                    }
+
                     Some(FormatElement::Line(LineMode::Hard))
                 } else {
                     // Keep EndEmbedded paired with the unresolved StartEmbedded.
@@ -2327,7 +2334,11 @@ pub struct FormatStateSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::LineWidth;
+    use super::{
+        FormatElement, Formatted, LineMode, LineWidth, SimpleFormatContext, TextRange, TextSize,
+    };
+    use crate::format_element::document::Document;
+    use crate::prelude::Tag;
     use biome_deserialize::json::deserialize_from_json_str;
     use biome_deserialize_macros::Deserializable;
     use biome_diagnostics::Error;
@@ -2405,5 +2416,47 @@ mod tests {
         let printed = Printed::new(String::new(), None, vec![], vec![]);
         let stripped = printed.strip_trailing_newlines();
         assert_eq!(stripped.as_code(), "");
+    }
+
+    #[test]
+    fn format_embedded_preserves_boundary_lines_for_block_embeds() {
+        let range = TextRange::new(TextSize::from(0), TextSize::from(1));
+        let mut formatted = Formatted::new(
+            Document::new(vec![
+                FormatElement::Token { text: "a" },
+                FormatElement::Tag(Tag::StartEmbedded(range)),
+                FormatElement::Tag(Tag::EndEmbedded),
+                FormatElement::Token { text: "b" },
+            ]),
+            SimpleFormatContext::default(),
+        );
+
+        formatted.format_embedded(|_| {
+            Some(Document::new(vec![
+                FormatElement::Line(LineMode::Hard),
+                FormatElement::Token { text: "x" },
+            ]))
+        });
+
+        assert_eq!(formatted.print().unwrap().as_code(), "a\nx\nb");
+    }
+
+    #[test]
+    fn format_embedded_can_replace_inline_content_without_boundary_lines() {
+        let range = TextRange::new(TextSize::from(0), TextSize::from(1));
+        let mut formatted = Formatted::new(
+            Document::new(vec![
+                FormatElement::Token { text: "a" },
+                FormatElement::Tag(Tag::StartEmbedded(range)),
+                FormatElement::Tag(Tag::EndEmbedded),
+                FormatElement::Token { text: "b" },
+            ]),
+            SimpleFormatContext::default(),
+        );
+
+        formatted
+            .format_embedded(|_| Some(Document::new(vec![FormatElement::Token { text: "x" }])));
+
+        assert_eq!(formatted.print().unwrap().as_code(), "axb");
     }
 }
