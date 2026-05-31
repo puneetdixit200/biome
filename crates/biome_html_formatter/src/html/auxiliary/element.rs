@@ -4,8 +4,8 @@ use crate::verbatim::{format_html_leading_comments, format_html_leading_comments
 use crate::{html::lists::element_list::FormatHtmlElementList, prelude::*};
 use biome_formatter::{CstFormatContext, FormatRefWithRule, FormatRuleWithOptions, write};
 use biome_html_syntax::{
-    AnyHtmlContent, AnyHtmlElement, AnyHtmlTagName, HtmlElement, HtmlElementFields,
-    HtmlElementList, HtmlRoot, HtmlSelfClosingElement, HtmlSyntaxToken,
+    AnyHtmlContent, AnyHtmlElement, AnyHtmlTagName, AnyHtmlTextExpression, HtmlElement,
+    HtmlElementFields, HtmlElementList, HtmlRoot, HtmlSelfClosingElement, HtmlSyntaxToken,
 };
 use biome_rowan::TokenText;
 use biome_string_case::StrLikeExtension;
@@ -198,10 +198,13 @@ impl FormatHtmlElement {
                 .syntax()
                 .first_token()
                 .is_some_and(|tok| tok.leading_trivia().pieces().any(|p| p.is_newline()));
+        let has_multiline_single_interpolation_child =
+            has_multiline_single_interpolation_child(&children);
 
         let forces_break_children = should_force_break_content
             // If `<template>` is at the root level, always force multiline formatting of its children.
             || (is_root_element_list && is_template_element)
+            || has_multiline_single_interpolation_child
             // Elements with a leading newline and direct element children should force
             // multiline unless they mix text with element children. Without a leading
             // newline (e.g. `<span><em>foo</em></span>`), the children stay inline.
@@ -237,12 +240,14 @@ impl FormatHtmlElement {
             && !children.is_empty()
             && !content_has_leading_whitespace
             && !should_be_verbatim
-            && !should_format_embedded_nodes;
+            && !should_format_embedded_nodes
+            && !has_multiline_single_interpolation_child;
         let should_borrow_closing_tag = is_element_internally_whitespace_sensitive
             && !children.is_empty()
             && !content_has_trailing_whitespace
             && !should_be_verbatim
-            && !should_format_embedded_nodes;
+            && !should_format_embedded_nodes
+            && !has_multiline_single_interpolation_child;
 
         let borrowed_r_angle = if should_borrow_opening_r_angle {
             opening_element.r_angle_token().ok()
@@ -373,4 +378,56 @@ fn has_text_child(node: &HtmlElementList) -> bool {
             .value_token()
             .is_ok_and(|token| !token.text_trimmed().is_empty())
     })
+}
+
+fn has_multiline_single_interpolation_child(node: &HtmlElementList) -> bool {
+    let mut children = node.iter();
+    let Some(AnyHtmlElement::AnyHtmlContent(AnyHtmlContent::AnyHtmlTextExpression(
+        text_expression,
+    ))) = children.next()
+    else {
+        return false;
+    };
+
+    if children.next().is_some() {
+        return false;
+    }
+
+    text_expression_has_line_break(&text_expression)
+}
+
+fn text_expression_has_line_break(text_expression: &AnyHtmlTextExpression) -> bool {
+    match text_expression {
+        AnyHtmlTextExpression::HtmlDoubleTextExpression(expression) => {
+            expression
+                .l_double_curly_token()
+                .is_ok_and(|token| token.trailing_trivia().pieces().any(|p| p.is_newline()))
+                || expression
+                    .expression()
+                    .ok()
+                    .and_then(|expression| expression.html_literal_token().ok())
+                    .is_some_and(|token| contains_line_break(token.text()))
+                || expression
+                    .r_double_curly_token()
+                    .is_ok_and(|token| token.leading_trivia().pieces().any(|p| p.is_newline()))
+        }
+        AnyHtmlTextExpression::HtmlSingleTextExpression(expression) => {
+            expression
+                .l_curly_token()
+                .is_ok_and(|token| token.trailing_trivia().pieces().any(|p| p.is_newline()))
+                || expression
+                    .expression()
+                    .ok()
+                    .and_then(|expression| expression.html_literal_token().ok())
+                    .is_some_and(|token| contains_line_break(token.text()))
+                || expression
+                    .r_curly_token()
+                    .is_ok_and(|token| token.leading_trivia().pieces().any(|p| p.is_newline()))
+        }
+        _ => false,
+    }
+}
+
+fn contains_line_break(text: &str) -> bool {
+    text.contains('\n') || text.contains('\r')
 }
