@@ -1,0 +1,45 @@
+---
+source: crates/biome_formatter_test/src/snapshot_builder.rs
+assertion_line: 249
+info: js/module/expression/member-chain/line_width_120/issue_10531.js
+---
+
+# Input
+
+```js
+import { integer, pgTable } from "drizzle-orm/pg-core";
+
+const example = pgTable("example", {
+	id: integer().primaryKey().generatedByDefaultAsIdentity({ name: "example_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 2147483647, cache: 1 }),
+});
+
+```
+
+
+# Options
+
+```json
+{
+	"formatter": {
+		"lineWidth": 120
+	}
+}
+```
+
+# Formatted
+
+```js
+import { integer, pgTable } from "drizzle-orm/pg-core";
+
+const example = pgTable("example", {
+	id: integer().primaryKey().generatedByDefaultAsIdentity({
+		name: "example_id_seq",
+		startWith: 1,
+		increment: 1,
+		minValue: 1,
+		maxValue: 2147483647,
+		cache: 1,
+	}),
+});
+
+```

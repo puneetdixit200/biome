@@ -321,6 +321,27 @@ impl MemberChain {
         self.tail.last().unwrap_or(&self.head)
     }
 
+    fn last_call_has_only_object_or_array_argument(&self) -> bool {
+        let Some(ChainMember::CallExpression { expression, .. }) =
+            self.last_group().members().last()
+        else {
+            return false;
+        };
+
+        expression.arguments().is_ok_and(|arguments| {
+            let mut args = arguments.args().iter();
+
+            let is_single_object_or_array_argument = matches!(
+                args.next(),
+                Some(Ok(AnyJsCallArgument::AnyJsExpression(
+                    AnyJsExpression::JsArrayExpression(_) | AnyJsExpression::JsObjectExpression(_)
+                )))
+            );
+
+            is_single_object_or_array_argument && args.next().is_none()
+        })
+    }
+
     /// Returns an iterator over all members in the member chain
     fn members(&self) -> impl DoubleEndedIterator<Item = &ChainMember> {
         self.head.members().iter().chain(self.tail.members())
@@ -400,7 +421,20 @@ impl Format<JsFormatContext> for MemberChain {
                     write!(f, [expand_parent()])?;
                 }
 
-                write!(f, [best_fitting!(format_one_line, format_expanded)])
+                if self.tail.any_group_has_leading_line_break()
+                    || !self.last_call_has_only_object_or_array_argument()
+                {
+                    write!(f, [best_fitting!(format_one_line, format_expanded)])
+                } else {
+                    write!(
+                        f,
+                        [best_fitting!(
+                            format_one_line,
+                            group(&format_one_line).should_expand(true),
+                            format_expanded
+                        )]
+                    )
+                }
             }
         });
 

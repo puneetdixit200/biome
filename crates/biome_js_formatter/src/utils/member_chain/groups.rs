@@ -148,6 +148,12 @@ impl TailChainGroups {
         Ok(false)
     }
 
+    pub(super) fn any_group_has_leading_line_break(&self) -> bool {
+        self.groups
+            .iter()
+            .any(MemberChainGroup::has_leading_line_break)
+    }
+
     /// Returns an iterator over all members
     pub(super) fn members(&self) -> impl DoubleEndedIterator<Item = &ChainMember> {
         self.groups.iter().flat_map(|group| group.members().iter())
@@ -229,6 +235,23 @@ impl MemberChainGroup {
                     }
                     _ => false,
                 }
+            }
+            _ => false,
+        })
+    }
+
+    fn has_leading_line_break(&self) -> bool {
+        let first = self.members.first();
+        first.is_some_and(|first| match first {
+            ChainMember::StaticMember { expression } => expression
+                .operator_token()
+                .is_ok_and(|operator| get_lines_before_token(&operator) > 0),
+            ChainMember::ComputedMember { expression } => {
+                expression.l_brack_token().is_ok_and(|l_brack_token| {
+                    get_lines_before_token(
+                        &expression.optional_chain_token().unwrap_or(l_brack_token),
+                    ) > 0
+                })
             }
             _ => false,
         })
